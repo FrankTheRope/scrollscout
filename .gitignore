@@ -1,0 +1,13 @@
+*.egg-info/
+*.pyc
+*.tif
+*.tiff
+*.webp
+__pycache__/
+data/
+demo/
+ink_9um/
+out/
+preds/
+volume-cache/
+work/
