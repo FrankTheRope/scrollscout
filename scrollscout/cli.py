@@ -104,6 +104,19 @@ def cmd_benchmark_suite(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_concordance(a: argparse.Namespace) -> int:
+    from .letterness import ScoreConfig
+    from .concordance import run as run_conc, format_report
+    cfg = ScoreConfig(pixel_size_um=a.pixel_size_um, working_um=a.working_um,
+                      window_mm=a.window_mm, stride_mm=a.stride_mm,
+                      auto_mask=not a.no_auto_mask, min_coverage=a.min_coverage)
+    rep = run_conc(a.predictions, cfg, out_dir=a.out)
+    print(format_report(rep))
+    if a.out:
+        print(f"\noutput -> {a.out}/concordance.json")
+    return 0
+
+
 def cmd_catalog(a: argparse.Namespace) -> int:
     from .catalog import ELIGIBLE_VOLUMES, scroll_paths, list_segments
     for scroll in ELIGIBLE_VOLUMES:
@@ -222,6 +235,18 @@ def build_parser() -> argparse.ArgumentParser:
     bs.add_argument("--letter-min", type=float, default=1.5)
     bs.add_argument("--letter-max", type=float, default=5.0)
     bs.set_defaults(func=cmd_benchmark_suite)
+
+    cc = sub.add_parser("concordance",
+                        help="due o piu' corse dello stesso segmento concordano?")
+    cc.add_argument("predictions", nargs="+")
+    cc.add_argument("--out", default=None)
+    cc.add_argument("--pixel-size-um", type=float, required=True)
+    cc.add_argument("--working-um", type=float, default=100.0)
+    cc.add_argument("--window-mm", type=float, default=10.0)
+    cc.add_argument("--stride-mm", type=float, default=2.0)
+    cc.add_argument("--no-auto-mask", action="store_true")
+    cc.add_argument("--min-coverage", type=float, default=0.80)
+    cc.set_defaults(func=cmd_concordance)
 
     c = sub.add_parser("catalog", help="list the 13 eligible scrolls and their S3 paths")
     c.add_argument("--ls", action="store_true", help="also list segments via anonymous aws s3 ls")

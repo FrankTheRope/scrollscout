@@ -206,3 +206,31 @@ def test_benchmark_suite_labels_mode(tmp_path):
                  "pixel_size_um": 100.0} for k in range(3)]
     rep = run_suite(manifest, tmp_path / "suite_lab", mode="labels")
     assert rep["mode"] == "labels" and rep["n_segments"] == 3
+
+
+def test_concordance_separates_agreement_from_noise(tmp_path):
+    """The measure must rate two runs that see the same structure far above two
+    that do not — otherwise it cannot retire a candidate."""
+    import tifffile
+    from scrollscout.concordance import run as run_conc, format_report
+    from scrollscout.letterness import ScoreConfig
+    base = make_text_image(seed=0, line_pitch_mm=5.0)
+    rng = np.random.default_rng(1)
+    # two "runs" of the same segment: same text, independent noise
+    a = np.clip(base + 0.10 * rng.standard_normal(base.shape).astype(np.float32), 0, 1)
+    b = np.clip(base + 0.10 * rng.standard_normal(base.shape).astype(np.float32), 0, 1)
+    # two runs that share nothing: independent noise fields
+    c = make_noise_image(seed=5)
+    d = make_noise_image(seed=6)
+    for name, img in (("a", a), ("b", b), ("c", c), ("d", d)):
+        tifffile.imwrite(tmp_path / f"{name}.tif", (img * 255).astype(np.uint8))
+    cfg = ScoreConfig(pixel_size_um=100.0, working_um=100.0, window_mm=10.0,
+                      stride_mm=2.0, auto_mask=False)
+    agree = run_conc([tmp_path / "a.tif", tmp_path / "b.tif"], cfg)
+    disagree = run_conc([tmp_path / "c.tif", tmp_path / "d.tif"], cfg)
+    assert agree["spearman_mean"] > disagree["spearman_mean"] + 0.3
+    assert agree["spearman_mean"] > 0.5
+    assert "spearman" in format_report(agree)
+    # three runs produce three pairs
+    three = run_conc([tmp_path / "a.tif", tmp_path / "b.tif", tmp_path / "c.tif"], cfg)
+    assert len(three["pairs"]) == 3
