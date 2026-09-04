@@ -71,7 +71,8 @@ def cmd_benchmark(a: argparse.Namespace) -> int:
         auto_mask=not a.no_auto_mask, min_coverage=a.min_coverage,
     )
     rep = run(a.prediction, a.label, cfg, a.out, min_label_frac=a.min_label_frac,
-              align=not a.no_align, iou_thresh=a.iou)
+              align=not a.no_align, iou_thresh=a.iou, region_mm=a.region_mm,
+              cover_frac=a.cover_frac)
     al = rep["alignment"]
     print(f"allineamento: dy={al['dy']} dx={al['dx']} peak_ratio={al['peak_ratio']} "
           f"applicato={al['applied']}")
@@ -166,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
     bm.add_argument("--min-coverage", type=float, default=0.80)
     bm.add_argument("--min-label-frac", type=float, default=0.005,
                     help="frazione di area annotata perche' una finestra sia positiva")
+    bm.add_argument("--region-mm", type=float, default=None,
+                    help="lato della cella di griglia usata come regione "
+                         "(default: meta' finestra)")
+    bm.add_argument("--cover-frac", type=float, default=0.5,
+                    help="frazione della cella che una finestra deve coprire "
+                         "per averla raggiunta (default 0.5)")
     bm.add_argument("--iou", type=float, default=0.2,
                     help="soglia IoU della non-maximum suppression (default 0.2)")
     bm.add_argument("--no-align", action="store_true",

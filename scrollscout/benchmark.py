@@ -28,16 +28,25 @@ A window is positive if the fraction of its area covered by annotated ink is at
 least `min_label_frac` (default 0.5 %). This is deliberately generous: the
 annotations are sparse, so a window with two annotated letters counts.
 
-Why region-level recall, and why NMS
------------------------------------
+Why grid regions, and why NMS
+-----------------------------
 Windows overlap heavily (10 mm window, 2 mm stride), so one patch of text
 produces hundreds of positive windows and plain window-level recall@10 is
 mechanically tiny however good the ranking is. And a human would never be shown
 ten near-identical windows of the same spot. So before counting, the ranking is
 passed through greedy non-maximum suppression (windows overlapping an already
-kept one above `iou_thresh` are dropped), and recall counts how many DISTINCT
-annotated regions the top K surviving windows reach. That is the operational
-question: "with a budget of K looks, how many of the text areas do we find".
+kept one above `iou_thresh` are dropped), and recall counts how many annotated
+REGIONS the top K surviving windows reach. That is the operational question:
+"with a budget of K looks, how many of the text areas do we find".
+
+Regions are cells of a fixed grid (default: half a window on a side), not
+connected components of the annotation. Components were tried first and failed:
+on a densely written segment the annotations merge into a handful of blobs — on
+PHerc0139 w035 the whole segment collapsed to 7 regions, so even random ordering
+reached all of them within 25 windows and every ranking scored 1.000. A fixed
+grid keeps the number of targets proportional to the area examined, so the
+metric stays informative on dense and sparse text alike, at the cost of being a
+coarse localisation criterion rather than an object-level one.
 
 An important caveat, stated here because it bounds what the numbers mean: the
 labels mark only strokes the annotators were sure of. A window with no
@@ -202,10 +211,13 @@ def rank_by(windows: list[WindowScore], weights: dict) -> np.ndarray:
 # ----------------------------------------------------------------------------
 def run(prediction_path: str | Path, label_path: str | Path, cfg: ScoreConfig,
         out_dir: str | Path, min_label_frac: float = 0.005, align: bool = True,
-        iou_thresh: float = 0.2, seed: int = 0) -> dict:
+        iou_thresh: float = 0.2, region_mm: float | None = None,
+        cover_frac: float = 0.5, seed: int = 0) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if region_mm is None:
+        region_mm = cfg.window_mm / 2.0
     pred = load_image(prediction_path)
     label_raw = load_image(label_path)
     label = resample_label(label_raw, pred.shape)
@@ -241,18 +253,47 @@ def run(prediction_path: str | Path, label_path: str | Path, cfg: ScoreConfig,
         label_frac[i] = s / max(area, 1)
     positive = label_frac >= min_label_frac
 
-    # Distinct annotated regions: annotations closer than half a window belong to
-    # the same "place to look", so they are merged before being counted.
-    win_px = max(8, int(round(cfg.window_mm * 1000 / cfg.pixel_size_um)))
-    merged = ndi.binary_closing(label, structure=np.ones((3, 3)),
-                                iterations=max(1, win_px // 8))
-    region_id, n_regions = ndi.label(merged)
+    # Distinct "places to look" are defined on a FIXED GRID of window-sized
+    # cells, not by connected components of the annotation.
+    #
+    # Connected components fail on dense text: a page of writing merges into a
+    # handful of blobs (7 on PHerc0139 w035), and with so few targets even a
+    # random ordering finds them all within 25 windows, so recall@K saturates
+    # at 1.000 for every ranking and measures nothing. A grid keeps the number
+    # of targets proportional to the annotated area, so "how much of the text
+    # do K looks reach" stays a real question on dense and sparse text alike.
+    cell_px = max(8, int(round(region_mm * 1000 / cfg.pixel_size_um)))
+    gy = (np.arange(label.shape[0]) // cell_px)[:, None]
+    gx = (np.arange(label.shape[1]) // cell_px)[None, :]
+    ny, nx = int(gy.max()) + 1, int(gx.max()) + 1
+    cell_id = (gy * nx + gx + 1).astype(np.int64)
+    # a cell counts as a target only if it holds enough annotated ink
+    counts = np.bincount(cell_id.ravel(), weights=label.ravel().astype(np.float64))
+    areas = np.bincount(cell_id.ravel())
+    with np.errstate(invalid="ignore", divide="ignore"):
+        frac = np.where(areas > 0, counts / np.maximum(areas, 1), 0.0)
+    is_target = frac >= min_label_frac
+    region_id = np.where(is_target[cell_id], cell_id, 0)
+    target_ids = sorted({int(v) for v in np.unique(region_id) if v > 0})
+    lut = np.zeros(int(cell_id.max()) + 1, dtype=np.int64)
+    for new_id, old_id in enumerate(target_ids, start=1):
+        lut[old_id] = new_id
+    region_id = lut[region_id]
+    n_regions = len(target_ids)
+    region_area = np.bincount(region_id.ravel(), minlength=n_regions + 1)
+
     boxes = np.array([[w.y0, w.x0, w.y1, w.x1] for w in windows], dtype=np.int64)
+    # A window "reaches" a region only if it covers at least `cover_frac` of that
+    # cell: merely clipping a corner is not a look at that place.
     win_regions: list[set] = []
     for w in windows:
         sub = region_id[max(0, w.y0):w.y1, max(0, w.x0):w.x1]
-        ids = np.unique(sub)
-        win_regions.append({int(v) for v in ids if v > 0})
+        ids, cnt = np.unique(sub, return_counts=True)
+        reached = set()
+        for v, c in zip(ids, cnt):
+            if v > 0 and region_area[v] and c / region_area[v] >= cover_frac:
+                reached.add(int(v))
+        win_regions.append(reached)
 
     rankings: dict[str, np.ndarray] = {}
     full = dict(cfg.weights)
@@ -271,6 +312,28 @@ def run(prediction_path: str | Path, label_path: str | Path, cfg: ScoreConfig,
     results = {name: rank_metrics(order, positive, boxes, win_regions, n_regions,
                                   iou_thresh=iou_thresh)
                for name, order in rankings.items()}
+
+    # Diagnostics. A sub-score that is saturated on nearly every window carries no
+    # ordering information: its "ranking" is then just the scan order, and any AP
+    # it reports is an artefact. Reporting saturation and the rank correlation
+    # against the full score makes such rows readable instead of misleading.
+    diagnostics = {"saturation": {}, "rank_corr_vs_full": {}}
+    full_order = rankings["ScrollScout (full)"]
+    full_rank = np.empty(len(windows), dtype=np.float64)
+    full_rank[full_order] = np.arange(len(windows))
+    for name in SUBSCORES:
+        v = np.array([getattr(w, name) for w in windows])
+        diagnostics["saturation"][name] = {
+            "frac_at_1.00": round(float((v >= 0.999).mean()), 3),
+            "frac_at_0.02_floor": round(float((v <= 0.021).mean()), 3),
+            "distinct_values": int(len(np.unique(np.round(v, 4)))),
+        }
+    for name, order in rankings.items():
+        r = np.empty(len(windows), dtype=np.float64)
+        r[order] = np.arange(len(windows))
+        a, b = r - r.mean(), full_rank - full_rank.mean()
+        den = float(np.sqrt((a * a).sum() * (b * b).sum()))
+        diagnostics["rank_corr_vs_full"][name] = round(float((a * b).sum() / den), 3) if den else 0.0
 
     # precision-recall curve for the main rankings
     try:
@@ -306,10 +369,14 @@ def run(prediction_path: str | Path, label_path: str | Path, cfg: ScoreConfig,
             "n_windows": int(len(windows)),
             "prevalence": round(float(positive.mean()), 4),
             "n_regions": int(n_regions),
+            "region_mm": region_mm,
+            "region_grid": [int(ny), int(nx)],
+            "cover_frac": cover_frac,
             "iou_thresh": iou_thresh,
         },
         "scoring_meta": meta,
         "results": results,
+        "diagnostics": diagnostics,
         "caveat": ("Labels are sparse and mark only strokes the annotators were sure of, "
                    "so precision is a lower bound. Comparisons between rankings on the "
                    "same data are unaffected."),
@@ -332,6 +399,17 @@ def format_table(report: dict) -> str:
     lines.append("-" * len(head))
     lines.append(f"{p['n_regions']} regioni annotate distinte; {p['n_positive_windows']} "
                  f"finestre positive su {p['n_windows']} (prevalenza {p['prevalence']:.3f})")
+    lines.append(f"regioni = celle di griglia da {p['region_mm']:.0f} mm "
+                 f"({p['region_grid'][0]}x{p['region_grid'][1]}) con almeno "
+                 f"{p['min_label_frac']*100:.1f}% di area annotata")
     lines.append("recall@K = frazione di regioni raggiunte dalle prime K finestre "
                  f"non sovrapposte (IoU < {p['iou_thresh']})")
+    d = report.get("diagnostics")
+    if d:
+        lines.append("")
+        lines.append("saturazione dei sub-punteggi (una feature satura non ordina nulla):")
+        for k, v in d["saturation"].items():
+            lines.append(f"  {k:<20} a 1.00: {v['frac_at_1.00']:.2f}   "
+                         f"al pavimento: {v['frac_at_0.02_floor']:.2f}   "
+                         f"valori distinti: {v['distinct_values']}")
     return "\n".join(lines)

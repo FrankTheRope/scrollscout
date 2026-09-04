@@ -81,6 +81,23 @@ def _make_bench(tmpdir):
     return pp, lp
 
 
+def test_benchmark_regions_are_informative(tmp_path):
+    """A metric that saturates for every ranking measures nothing. Grid regions
+    must stay numerous enough that random ordering does NOT reach them all."""
+    from scrollscout.benchmark import run
+    from scrollscout.letterness import ScoreConfig
+    pp, lp = _make_bench(tmp_path)
+    cfg = ScoreConfig(pixel_size_um=100.0, working_um=100.0, window_mm=10.0,
+                      stride_mm=2.0, auto_mask=False)
+    rep = run(pp, lp, cfg, tmp_path / "out")
+    assert rep["positives"]["n_regions"] >= 20
+    rnd = rep["results"]["baseline: casuale"]
+    assert rnd["recall@10"] < 0.5 and rnd["recall@50"] < 0.95
+    sat = rep["diagnostics"]["saturation"]
+    assert set(sat) == {"ink_fraction", "line_periodicity", "stroke_shape", "anisotropy"}
+    assert all(0.0 <= v["frac_at_1.00"] <= 1.0 for v in sat.values())
+
+
 def test_benchmark_beats_random(tmp_path):
     from scrollscout.benchmark import run
     from scrollscout.letterness import ScoreConfig
@@ -93,6 +110,7 @@ def test_benchmark_beats_random(tmp_path):
     assert rep["positives"]["n_regions"] > 0
     assert full["average_precision"] > 2 * rnd["average_precision"]
     assert full["recall@10"] > 2 * rnd["recall@10"]
+    assert rep["positives"]["region_mm"] == 5.0
     assert 0.0 <= full["recall@100"] <= 1.0
     # NMS must actually suppress overlaps
     assert full["n_kept_after_nms"] <= 100
