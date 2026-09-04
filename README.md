@@ -58,25 +58,32 @@ Useful flags: `--window-mm 20 --stride-mm 5` (prize area), `--pitch-min/--pitch-
 
 ## How the score works
 
-For every window (default 20 × 20 mm, stride 5 mm, analysed at ~0.1 mm/px):
+**ScrollScout does not detect letters. It measures whether an ink prediction is
+geometrically credible as writing**, and ranks windows accordingly.
 
-| sub-score | what it measures | why |
+For every window (default 20 x 20 mm, stride 5 mm, analysed at ~0.1 mm/px), the
+foreground is isolated with a local white top-hat at the scale of a letter
+stroke, then:
+
+| sub-score | weight | what it measures |
 |---|---|---|
-| `ink_fraction` | fraction of pixels above a global Otsu threshold, scored with a plausibility band (default 4–35 %) | empty windows and smears (wrong depth, sheet merger) both fail |
-| `line_periodicity` | prominence of the dominant period of the row-projection autocorrelation inside the line-pitch range, averaged over 3 vertical strips and multiplied by the cross-strip coherence; searched over tilt angles ±10° | text lines are periodic **and** span the window; smoothed noise is neither |
-| `stroke_shape` | fraction of ink area in connected components that are letter-sized and thin/wiggly (perimeter²/4πA ≥ 3) | separates strokes from blobs |
-| `anisotropy` | row periodicity vs column periodicity | lines are horizontal bands, not vertical ones |
+| `line_periodicity` | 4 | prominence of the dominant row-projection period inside the expected line-pitch range, over 3 vertical strips (coherence-weighted) and 7 tilt angles |
+| `anisotropy` | 1 | row periodicity vs column periodicity: lines are horizontal bands |
+| `ink_fraction` | gate | multiplicative veto for implausible coverage (empty windows, smears) — not a ranking term |
+| `stroke_shape` | 0 | computed and reported; its sign is not stable across data types |
 
-Final score = weighted geometric mean (weights 1 / 2 / 1.5 / 1), so a window has
-to pass *all* tests. Synthetic regression tests live in `tests/`.
+The weights were **measured, not chosen**: see
+[`docs/feature_selection.md`](docs/feature_selection.md). On five real segments
+`line_periodicity` separates text from papyrus with no overlap (1.000 vs
+0.22-0.28 at the 95th percentile), while `stroke_shape` inverts on real data and
+`ink_fraction` takes a single distinct value across 440 windows.
 
-## Validation
+Final score = weighted geometric mean of the voting sub-scores, multiplied by
+the ink gate.
 
-On real `ink_9um` predictions of a known-text segment (PHerc0139 w035) the
-scorer reaches **0.93** with 117/440 windows above 0.6; on raw papyrus renders
-of PHerc1447 it tops out at 0.50 with none above 0.6. Details, thresholds and
-reproduction commands: [`docs/validation_w035.md`](docs/validation_w035.md)
-and [`docs/baseline_pherc1447.md`](docs/baseline_pherc1447.md).
+**Operating threshold:** a window above 0.6 on a prediction is a candidate;
+below 0.5 is background. Measured separation of the final score (95th
+percentile): text 0.972-0.973, raw papyrus 0.136-0.297.
 
 ## Limits (read before trusting a number)
 
