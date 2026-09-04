@@ -59,10 +59,25 @@ class ScoreConfig:
     angles_deg: tuple[float, ...] = (-10, -6, -3, 0, 3, 6, 10)
     stroke_width_mm: float = 0.6           # scale of the top-hat filter (letter stroke)
     ink_band: tuple[float, float] = (0.04, 0.35)  # plausible ink fraction band
+    # Weights measured, not assumed (see docs/feature_selection.md).
+    #
+    # `line_periodicity` separates text from papyrus with no overlap on the five
+    # real segments available (1.000 vs 0.22-0.28 at the 95th percentile), and
+    # removing it collapses the benchmark. It carries the score.
+    #
+    # `ink_fraction` is NOT here: on real predictions it takes a single distinct
+    # value across 440 windows, so it cannot order anything. It is kept as a
+    # multiplicative gate below — its job is to veto empty windows and smears,
+    # which it does, not to rank.
+    #
+    # `stroke_shape` is NOT here either: its sign is not stable. On synthetic
+    # data it points the right way (text 1.00 vs noise 0.24) but on real data it
+    # inverts (text 0.49 vs papyrus 0.71-0.92), because fibre lattices survive
+    # the top-hat as thin fragmented structures while blurred model predictions
+    # do not. Three papyrus segments against two text segments is too little to
+    # justify flipping its sign, so it is computed, reported, and given no vote.
     weights: dict = field(default_factory=lambda: {
-        "ink_fraction": 1.0,
         "line_periodicity": 4.0,
-        "stroke_shape": 1.0,
         "anisotropy": 1.0,
     })
     invert: bool = False                   # set True if ink is dark in the input
@@ -259,12 +274,19 @@ def _stroke_shape_score(binary: np.ndarray, px_mm: float, letter_h_mm: tuple[flo
 
 
 def _band_score(x: float, lo: float, hi: float) -> float:
-    """1 inside [lo, hi], smooth decay outside (half-width = band width)."""
+    """1 inside [lo, hi], decaying outside — asymmetrically.
+
+    Below the band the decay width is `lo` itself, so an empty window scores 0
+    rather than being let through: with a symmetric decay of the band's width
+    (0.31 here) a coverage of 0.00 still scored 0.87, and the gate waved through
+    exactly the windows it exists to stop. Above the band the decay keeps the
+    band's width, since a smear is a matter of degree.
+    """
     if lo <= x <= hi:
         return 1.0
-    width = max(hi - lo, 1e-6)
-    d = (lo - x) if x < lo else (x - hi)
-    return float(max(0.0, 1.0 - d / width))
+    if x < lo:
+        return float(max(0.0, 1.0 - (lo - x) / max(lo, 1e-6)))
+    return float(max(0.0, 1.0 - (x - hi) / max(hi - lo, 1e-6)))
 
 
 # ----------------------------------------------------------------------------
@@ -330,7 +352,7 @@ def score_image(img: np.ndarray, cfg: ScoreConfig, mask: np.ndarray | None = Non
     xs = list(range(half, W - half + 1, stride)) or [half]
     grid = np.zeros((len(ys), len(xs)), dtype=np.float32)
     results: list[WindowScore] = []
-    wsum = sum(cfg.weights.values())
+    wsum = sum(v for v in cfg.weights.values() if v > 0) or 1.0
 
     for i, cy in enumerate(ys):
         for j, cx in enumerate(xs):
@@ -366,10 +388,19 @@ def score_image(img: np.ndarray, cfg: ScoreConfig, mask: np.ndarray | None = Non
             s_stroke = _stroke_shape_score(patch_b > thr, px_mm, cfg.letter_height_mm)
             # ---- combine (weighted geometric mean with a small floor) ----
             eps = 0.02
-            subs = {"ink_fraction": s_ink, "line_periodicity": s_period,
-                    "stroke_shape": s_stroke, "anisotropy": s_aniso}
-            logsum = sum(cfg.weights[k] * math.log(max(v, eps)) for k, v in subs.items())
-            score = float(math.exp(logsum / wsum))
+            all_subs = {"ink_fraction": s_ink, "line_periodicity": s_period,
+                        "stroke_shape": s_stroke, "anisotropy": s_aniso}
+            subs = {k: v for k, v in all_subs.items() if cfg.weights.get(k, 0.0) > 0}
+            if subs:
+                logsum = sum(cfg.weights[k] * math.log(max(v, eps)) for k, v in subs.items())
+                score = float(math.exp(logsum / wsum))
+            else:
+                score = 0.0
+            # ink_fraction acts as a GATE, not as a ranking term: a window whose
+            # ink coverage is implausible (empty, or a smear from a wrong depth or
+            # a merged sheet) is suppressed whatever its geometry looks like.
+            if "ink_fraction" not in subs:
+                score *= s_ink
             grid[i, j] = score
             # window box in original pixels
             oy0, ox0 = int((cy - half) * factor), int((cx - half) * factor)

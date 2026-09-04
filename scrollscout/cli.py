@@ -81,6 +81,29 @@ def cmd_benchmark(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark_suite(a: argparse.Namespace) -> int:
+    from .benchmark_suite import run_suite, format_suite, discover_labels
+    if a.discover_labels:
+        manifest = discover_labels(a.discover_labels, a.pixel_size_um)
+        if not manifest:
+            print(f"nessun *_inklabels.tif trovato sotto {a.discover_labels}")
+            return 1
+        mode = "labels"
+    else:
+        manifest = json.loads(Path(a.manifest).read_text())
+        mode = a.mode
+    print(f"{len(manifest)} segmenti, modalita' '{mode}':")
+    rep = run_suite(manifest, a.out, mode=mode, window_mm=a.window_mm,
+                    stride_mm=a.stride_mm, working_um=a.working_um,
+                    region_mm=a.region_mm, min_label_frac=a.min_label_frac,
+                    pitch_mm=(a.pitch_min, a.pitch_max),
+                    letter_mm=(a.letter_min, a.letter_max))
+    print()
+    print(format_suite(rep))
+    print(f"\noutput -> {a.out}/suite.json, suite_ap.png")
+    return 0
+
+
 def cmd_catalog(a: argparse.Namespace) -> int:
     from .catalog import ELIGIBLE_VOLUMES, scroll_paths, list_segments
     for scroll in ELIGIBLE_VOLUMES:
@@ -178,6 +201,27 @@ def build_parser() -> argparse.ArgumentParser:
     bm.add_argument("--no-align", action="store_true",
                     help="non stimare lo scostamento fra label e predizione")
     bm.set_defaults(func=cmd_benchmark)
+
+    bs = sub.add_parser("benchmark-suite",
+                        help="benchmark su piu' segmenti, con confronti appaiati")
+    bs.add_argument("manifest", nargs="?", help="JSON con i segmenti da valutare")
+    bs.add_argument("--discover-labels", metavar="DIR",
+                    help="costruisci un manifest in modalita' 'labels' da ogni "
+                         "*_inklabels.tif sotto DIR")
+    bs.add_argument("--mode", choices=["predictions", "labels"], default="predictions")
+    bs.add_argument("--out", default="suite_out")
+    bs.add_argument("--pixel-size-um", type=float, default=9.6,
+                    help="usato solo con --discover-labels")
+    bs.add_argument("--working-um", type=float, default=100.0)
+    bs.add_argument("--window-mm", type=float, default=10.0)
+    bs.add_argument("--stride-mm", type=float, default=2.0)
+    bs.add_argument("--region-mm", type=float, default=None)
+    bs.add_argument("--min-label-frac", type=float, default=0.005)
+    bs.add_argument("--pitch-min", type=float, default=3.0)
+    bs.add_argument("--pitch-max", type=float, default=9.0)
+    bs.add_argument("--letter-min", type=float, default=1.5)
+    bs.add_argument("--letter-max", type=float, default=5.0)
+    bs.set_defaults(func=cmd_benchmark_suite)
 
     c = sub.add_parser("catalog", help="list the 13 eligible scrolls and their S3 paths")
     c.add_argument("--ls", action="store_true", help="also list segments via anonymous aws s3 ls")

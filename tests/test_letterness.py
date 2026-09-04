@@ -14,6 +14,23 @@ def _best(img):
     return windows[0], grid, meta
 
 
+def test_ink_fraction_gates_but_does_not_rank():
+    """ink_fraction must veto implausible windows without entering the ranking:
+    on real predictions it takes one distinct value over hundreds of windows, so
+    as a ranking term it is noise wearing a feature's name."""
+    cfg = ScoreConfig(pixel_size_um=100.0, working_um=100.0)
+    assert "ink_fraction" not in cfg.weights
+    assert "stroke_shape" not in cfg.weights
+    # a window with implausible coverage is suppressed even with perfect geometry
+    from scrollscout.letterness import _band_score
+    assert _band_score(0.00, *cfg.ink_band) == 0.0     # empty window is vetoed
+    assert _band_score(0.70, *cfg.ink_band) == 0.0     # smear is vetoed
+    assert _band_score(0.15, *cfg.ink_band) == 1.0
+    # both sub-scores are still computed and reported
+    ws, _, _ = score_image(make_text_image(seed=0), cfg)
+    assert 0.0 <= ws[0].stroke_shape <= 1.0 and 0.0 <= ws[0].ink_fraction <= 1.0
+
+
 def test_text_beats_noise_and_stripes():
     text, _, _ = _best(make_text_image(line_pitch_mm=5.0, seed=0))
     noise, _, _ = _best(make_noise_image(seed=1))
@@ -108,7 +125,10 @@ def test_benchmark_beats_random(tmp_path):
     full = rep["results"]["ScrollScout (full)"]
     rnd = rep["results"]["baseline: casuale"]
     assert rep["positives"]["n_regions"] > 0
-    assert full["average_precision"] > 2 * rnd["average_precision"]
+    # 1.5x, not 2x: dropping stroke_shape costs performance on SYNTHETIC data,
+    # where its sign happens to be correct, and buys it back on real data, where
+    # it is inverted. The synthetic suite is the side of that trade we lose.
+    assert full["average_precision"] > 1.5 * rnd["average_precision"]
     assert full["recall@10"] > 2 * rnd["recall@10"]
     assert rep["positives"]["region_mm"] == 5.0
     assert 0.0 <= full["recall@100"] <= 1.0
@@ -127,3 +147,62 @@ def test_benchmark_detects_useless_ranking(tmp_path):
     bad = rank_metrics(_np.arange(20)[::-1], positive, boxes, win_regions, 1, ks=(5,))
     assert good["average_precision"] == 1.0
     assert bad["average_precision"] < 0.5
+
+
+def test_benchmark_suite_paired(tmp_path):
+    """The suite must aggregate across segments and produce paired statistics
+    that can contradict the current design — a comparison that can only agree
+    is not a comparison."""
+    import json
+    import tifffile
+    from scipy import ndimage as ndi
+    from scrollscout.benchmark_suite import run_suite, format_suite
+    from scrollscout.synth import make_noise_image
+    rng = np.random.default_rng(0)
+    manifest = []
+    for k, pitch in enumerate((5.0, 6.0, 4.5, 7.0)):
+        H = W = 900
+        pred = make_noise_image(shape_mm=(90, 90), pixel_um=100.0, seed=k)
+        label = np.zeros((H, W), bool)
+        for j, (y, x) in enumerate([(80, 80), (80, 500), (500, 120)]):
+            t = make_text_image(shape_mm=(28, 28), pixel_um=100.0,
+                                line_pitch_mm=pitch, seed=k * 10 + j, margin_mm=2)
+            h, w = t.shape
+            pred[y:y + h, x:x + w] = np.maximum(pred[y:y + h, x:x + w], t)
+            ink = t > np.percentile(t, 90)
+            lab_, n = ndi.label(ink)
+            keep = np.zeros_like(ink)
+            for s in rng.choice(np.arange(1, n + 1), size=max(1, n // 2), replace=False):
+                keep |= (lab_ == s)
+            label[y:y + h, x:x + w] = keep
+        pp, lp = tmp_path / f"s{k}_p.tif", tmp_path / f"s{k}_l.tif"
+        tifffile.imwrite(pp, (np.clip(pred, 0, 1) * 255).astype(np.uint8))
+        tifffile.imwrite(lp, (label * 255).astype(np.uint8))
+        manifest.append({"name": f"s{k}", "prediction": str(pp), "label": str(lp),
+                         "pixel_size_um": 100.0})
+    rep = run_suite(manifest, tmp_path / "suite", mode="predictions")
+    assert rep["n_segments"] == 4 and rep["n_failed"] == 0
+    agg = rep["aggregate"]
+    full = agg["ScrollScout (full)"]
+    rnd = agg["baseline: casuale"]
+    assert full["ap_mean"] > rnd["ap_mean"]
+    assert full["paired_diff_vs_full_mean"] == 0.0          # full vs itself
+    assert rnd["wins_vs_full"] + rnd["losses_vs_full"] == 4  # every segment paired
+    assert "wilcoxon_p_vs_full" in rnd
+    assert len(json.loads((tmp_path / "suite" / "suite.json").read_text())["per_segment"]) == 4
+    assert "AP medio" in format_suite(rep)
+
+
+def test_benchmark_suite_labels_mode(tmp_path):
+    """`labels` mode uses the annotation as its own prediction: an upper bound
+    on the scorer under ideal detection."""
+    import tifffile
+    from scrollscout.benchmark_suite import run_suite
+    for k in range(3):
+        t = make_text_image(shape_mm=(60, 60), pixel_um=100.0, line_pitch_mm=5.0, seed=k)
+        tifffile.imwrite(tmp_path / f"seg{k}_inklabels.tif",
+                         ((t > np.percentile(t, 88)) * 255).astype(np.uint8))
+    manifest = [{"name": f"seg{k}", "label": str(tmp_path / f"seg{k}_inklabels.tif"),
+                 "pixel_size_um": 100.0} for k in range(3)]
+    rep = run_suite(manifest, tmp_path / "suite_lab", mode="labels")
+    assert rep["mode"] == "labels" and rep["n_segments"] == 3
