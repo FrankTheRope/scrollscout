@@ -17,6 +17,8 @@ predictions produced by the public `scrollprize/ink_9um` models (or any other).
                                         depth windows)
 ```
 
+**[All results on one page →](docs/results.md)**
+
 ## Install
 
 ```bash
