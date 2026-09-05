@@ -17,6 +17,10 @@ predictions produced by the public `scrollprize/ink_9um` models (or any other).
                                         depth windows)
 ```
 
+![Top-8 windows on PHerc0139 w035](docs/img/gallery_w035.png)
+
+*Top-8 non-overlapping 10 mm windows on the public `ink_9um` prediction of PHerc0139 w035, ranked by ScrollScout. The detected line pitch (4.7-4.9 mm) is the measured pitch of the scroll's hand.*
+
 **[All results on one page →](docs/results.md)**
 
 ## Install
