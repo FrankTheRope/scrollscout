@@ -19,7 +19,8 @@ CPU-only, no training, classical signal processing on top of the public
 | Separation, text vs papyrus (score p95) | **0.97** vs **0.14–0.30** | [feature_selection](feature_selection.md) |
 | Same, with predictions on **both** sides | **0.97–0.99** vs **0.36–0.64** | [pherc1447_predictions](pherc1447_predictions.md) |
 | Ranking quality vs random (AP, w035) | **0.64** vs **0.37** | [validation_w035](validation_w035.md) |
-| Run-to-run agreement, text present | **0.78** Spearman | [pherc1447_predictions](pherc1447_predictions.md) |
+| Run-to-run agreement, text present (two seeds) | **0.78** Spearman | [pherc1447_predictions](pherc1447_predictions.md) |
+| Cross-model agreement, text present (`ink_9um` vs `canon_2um`, 9 vs 2.4 µm) | **0.64** Spearman | this page |
 | Run-to-run agreement, PHerc1447 | **0.16–0.37** (shuffled control: 0.09) | same |
 | Raw-render noise floor, 3 segments × 4 projections | max **0.505**, `period` never above 0.42 | [baseline_pherc1447](baseline_pherc1447.md) |
 
