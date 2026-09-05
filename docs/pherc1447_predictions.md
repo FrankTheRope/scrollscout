@@ -117,9 +117,33 @@ three segments out of sixteen, one depth window, two seeds, one checkpoint, and
 the models' own generalisation to this scroll — which the Challenge lists as an
 open problem. It does not say the scroll has no ink.
 
-What would change the answer, in order of expected value: a depth sweep (the
-models are sensitive to surface offset, and only the default window was tried);
-the remaining twelve segments, which need rendering and therefore VC3D; and
+### The depth sweep, run
+
+The most likely explanation for a false negative was surface offset: the models
+are sensitive to where in the stack they look, and only the default window had
+been tried. Segment 025628 — the most structured of the three — was re-run at
+three non-overlapping depth windows of the 31 available slices (0-16, 7-23,
+14-30), two seeds, both directions:
+
+| depth window | Spearman (seeds 42/43) | best score s42 | best score s43 |
+|---|---|---|---|
+| low (0-16) | 0.336 | 0.384 | 0.569 |
+| mid (7-23, default) | 0.370 | 0.480 | 0.633 |
+| high (14-30) | 0.325 | **0.697** | 0.432 |
+
+Concordance is flat across depth, and every window sits far below the 0.78 of a
+text-bearing segment. Global statistics were equally flat (nonzero fraction
+0.649 at every depth, p99 between 140 and 157). **Surface offset does not
+explain the negative.**
+
+The `high` window is worth naming: seed 42 produced 0.697, the highest score
+PHerc1447 has ever given and well above the 0.6 threshold, while seed 43 on the
+same slices gave 0.432 and the two agree at 0.325. Without the concordance check
+this would have looked like the strongest candidate of the project.
+
+What would change the answer now, in order of expected value: the remaining
+twelve segments, which need rendering and therefore VC3D; a scroll-specific
+model, since the Challenge lists cross-scroll ink generalisation as open; and
 pseudo-labelling from any region that shows structure under a finer render.
 
 ## Reproducibility
