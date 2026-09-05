@@ -59,11 +59,18 @@ class ScoreConfig:
     angles_deg: tuple[float, ...] = (-10, -6, -3, 0, 3, 6, 10)
     stroke_width_mm: float = 0.6           # scale of the top-hat filter (letter stroke)
     ink_band: tuple[float, float] = (0.04, 0.35)  # plausible ink fraction band
-    # Weights measured, not assumed (see docs/feature_selection.md).
+    # Weights measured, not assumed (see docs/feature_selection.md and
+    # docs/benchmark_pherc0139.md).
     #
     # `line_periodicity` separates text from papyrus with no overlap on the five
     # real segments available (1.000 vs 0.22-0.28 at the 95th percentile), and
-    # removing it collapses the benchmark. It carries the score.
+    # removing it collapses the benchmark. It carries the score — alone.
+    #
+    # `anisotropy` was kept in v0.6 on a 0.89-vs-0.61 gap measured on two text
+    # segments. On six annotated segments of PHerc0139 with real predictions its
+    # removal changed Average Precision by +0.001 (4 wins, 2 losses, p=0.44): it
+    # does nothing. A score that is periodicity times the ink gate is more
+    # honest than one that pretends to combine two things.
     #
     # `ink_fraction` is NOT here: on real predictions it takes a single distinct
     # value across 440 windows, so it cannot order anything. It is kept as a
@@ -77,8 +84,7 @@ class ScoreConfig:
     # do not. Three papyrus segments against two text segments is too little to
     # justify flipping its sign, so it is computed, reported, and given no vote.
     weights: dict = field(default_factory=lambda: {
-        "line_periodicity": 4.0,
-        "anisotropy": 1.0,
+        "line_periodicity": 1.0,
     })
     invert: bool = False                   # set True if ink is dark in the input
     auto_mask: bool = True                 # treat exact-zero pixels as outside the mesh

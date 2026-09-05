@@ -298,9 +298,11 @@ def run(prediction_path: str | Path, label_path: str | Path, cfg: ScoreConfig,
     rankings: dict[str, np.ndarray] = {}
     full = dict(cfg.weights)
     rankings["ScrollScout (full)"] = rank_by(windows, full)
-    for name in SUBSCORES:
-        w2 = {k: v for k, v in full.items() if k != name}
-        rankings[f"ablation: senza {name}"] = rank_by(windows, w2)
+    voting = [k for k, v in full.items() if v > 0]
+    if len(voting) > 1:                      # leave-one-out only makes sense with >1 voter
+        for name in voting:
+            w2 = {k: v for k, v in full.items() if k != name}
+            rankings[f"ablation: senza {name}"] = rank_by(windows, w2)
     for name in SUBSCORES:
         rankings[f"solo {name}"] = rank_by(windows, {name: 1.0})
     raw = np.array([w.raw_ink_fraction for w in windows])

@@ -1,4 +1,4 @@
-# Feature selection, measured (ScrollScout v0.6)
+# Feature selection, measured (ScrollScout v0.6 → v0.8)
 
 *Until v0.5 the score was a weighted geometric mean of four sub-scores with
 weights chosen by hand (1 / 4 / 1 / 1). This document reports the experiments
@@ -100,6 +100,17 @@ happens to be correct, and buys it back on real data, where it is inverted. The
 synthetic regression test was relaxed from 2x to 1.5x over random accordingly.
 That is the honest shape of the trade, and it is recorded in the test itself
 rather than quietly absorbed.
+
+## Addendum (v0.8): `anisotropy` did not survive six segments
+
+The section above kept `anisotropy` on a 0.89-vs-0.61 gap measured on two text
+segments. Run on six annotated segments of PHerc. 139 with the published
+`canon_2um` predictions ([`benchmark_pherc0139.md`](benchmark_pherc0139.md)),
+removing it changes Average Precision by +0.001 (4 wins, 2 losses, p = 0.44).
+It has no measurable effect. **v0.8 drops it**; the score is `line_periodicity`
+times the ink gate, and separation on the papyrus side improves from 0.190 to
+0.149 while text stays at 1.000. The prediction made above — that one more
+scroll could erase the gap — was correct, and it took only one.
 
 ## The limitation that matters most
 

@@ -21,6 +21,9 @@ def test_ink_fraction_gates_but_does_not_rank():
     cfg = ScoreConfig(pixel_size_um=100.0, working_um=100.0)
     assert "ink_fraction" not in cfg.weights
     assert "stroke_shape" not in cfg.weights
+    # anisotropy: no measurable effect on six annotated segments (v0.8)
+    assert "anisotropy" not in cfg.weights
+    assert set(cfg.weights) == {"line_periodicity"}
     # a window with implausible coverage is suppressed even with perfect geometry
     from scrollscout.letterness import _band_score
     assert _band_score(0.00, *cfg.ink_band) == 0.0     # empty window is vetoed

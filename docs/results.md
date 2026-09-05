@@ -16,7 +16,7 @@ CPU-only, no training, classical signal processing on top of the public
 
 | claim | number | where |
 |---|---|---|
-| Separation, text vs papyrus (score p95) | **0.97** vs **0.14–0.30** | [feature_selection](feature_selection.md) |
+| Separation, text vs papyrus (score p95) | **1.00** vs **0.15–0.30** | [feature_selection](feature_selection.md) |
 | Same, with predictions on **both** sides | **0.97–0.99** vs **0.36–0.64** | [pherc1447_predictions](pherc1447_predictions.md) |
 | Ranking quality vs random (AP, w035) | **0.64** vs **0.37** | [validation_w035](validation_w035.md) |
 | Run-to-run agreement, text present (two seeds) | **0.78** Spearman | [pherc1447_predictions](pherc1447_predictions.md) |
@@ -111,6 +111,7 @@ and is fetched from the public bucket by the commands shown.
 ## Documents
 
 - [`feature_selection.md`](feature_selection.md) — how the weights were measured, and what it cost
+- [`benchmark_pherc0139.md`](benchmark_pherc0139.md) — six annotated segments, real predictions: what the within-segment benchmark can and cannot say
 - [`pherc1447_predictions.md`](pherc1447_predictions.md) — the GPU session, the negative result, the retired candidate
 - [`validation_w035.md`](validation_w035.md) — validation on real predictions of a known-text segment
 - [`baseline_pherc1447.md`](baseline_pherc1447.md) — the raw-render noise floor and the false-positive modes
